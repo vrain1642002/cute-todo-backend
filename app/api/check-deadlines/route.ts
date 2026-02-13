@@ -9,15 +9,15 @@ export async function GET(request: Request) {
         const db = getFirestore();
         const messaging = getMessaging();
         const now = new Date();
+        const fiveMinutesAgo = new Date(now.getTime() - 5 * 60 * 1000);
         const tenMinutesFromNow = new Date(now.getTime() + 10 * 60 * 1000);
 
-        // 🚀 ULTRA-SAFE QUERY: Only query by status to avoid ANY composite index requirements.
-        // We will perform all time-based filtering in memory.
+        // 🚀 ULTRA-SAFE QUERY: Only query by status
         const todosSnapshot = await db.collection('todos')
             .where('status', '==', 'todo')
             .get();
 
-        console.log(`Status filter returned ${todosSnapshot.size} potential todos. Filtering by time in-memory...`);
+        console.log(`Scanning window: ${fiveMinutesAgo.toISOString()} to ${tenMinutesFromNow.toISOString()}`);
 
         if (todosSnapshot.empty) {
             return NextResponse.json({ success: true, message: 'No tasks with status "todo" found.' });
@@ -40,8 +40,8 @@ export async function GET(request: Request) {
                 ? rawDueDate.toDate()
                 : new Date(rawDueDate);
 
-            // 3. In-memory check: Is it due between NOW and 10 minutes from now?
-            const isDueSoon = dueDate >= now && dueDate <= tenMinutesFromNow;
+            // 3. In-memory check: Is it due between 5 mins ago and 10 mins from now?
+            const isDueSoon = dueDate >= fiveMinutesAgo && dueDate <= tenMinutesFromNow;
 
             if (!isDueSoon) continue;
 
