@@ -1,27 +1,19 @@
 import { NextResponse } from 'next/server';
 import { messaging } from '@/lib/firebase-admin';
-import nodemailer from 'nodemailer';
-
-// Email Transporter Configuration
-const transporter = nodemailer.createTransport({
-    host: process.env.SMTP_HOST || 'smtp.gmail.com',
-    port: parseInt(process.env.SMTP_PORT || '587'),
-    secure: process.env.SMTP_SECURE === 'true',
-    auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-    },
-});
 
 export async function POST(request: Request) {
     try {
         const body = await request.json();
         const {
-            token, // FCM Token (optional if only email)
-            email, // Recipient Email (optional if only push)
+            token, // FCM Token
+            email, // Recipient Email
             title,
             body: messageBody,
-            data
+            userName,
+            taskTitle,
+            dueTime,
+            minutesLeft,
+            languageCode = 'vi'
         } = body;
 
         const results = {
@@ -38,29 +30,8 @@ export async function POST(request: Request) {
                         title: title || 'New Notification',
                         body: messageBody || '',
                     },
-                    data: data || {},
-                    webpush: {
-                        headers: { TTL: '86400' },
-                        notification: {
-                            icon: '/icons/icon-192x192.png',
-                            badge: '/icons/badge-72x72.png',
-                        }
-                    },
-                    android: {
-                        priority: 'high' as const,
-                        notification: {
-                            sound: 'default',
-                            channelId: 'default_channel_id',
-                        },
-                    },
-                    apns: {
-                        payload: {
-                            aps: {
-                                sound: 'default',
-                                contentAvailable: true,
-                            },
-                        },
-                    },
+                    android: { priority: 'high' as const },
+                    apns: { payload: { aps: { contentAvailable: true } } },
                 };
                 const fcmResponse = await messaging.send(message);
                 results.fcm = `success: ${fcmResponse}`;
@@ -70,40 +41,49 @@ export async function POST(request: Request) {
             }
         }
 
-        // 2. Send Email
+        // 2. Send Email via EmailJS API
         if (email) {
             try {
-                if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
-                    results.email = 'failed: SMTP credentials missing';
-                } else {
-                    await transporter.sendMail({
-                        from: process.env.SMTP_FROM || '"Cute Todo" <no-reply@cutetodo.app>',
-                        to: email,
-                        subject: title || 'New Task Created',
-                        text: messageBody || 'You have a new task.',
-                        html: `
-              <div style="font-family: Arial, sans-serif; padding: 20px;">
-                <h2 style="color: #6C63FF;">${title}</h2>
-                <p>${messageBody}</p>
-                <hr/>
-                <p style="font-size: 12px; color: #888;">Expected via Cute Todo</p>
-              </div>
-            `,
-                    });
+                const EMAILJS_SERVICE_ID = process.env.EMAILJS_SERVICE_ID || 'service_lx2vsyo';
+                const EMAILJS_TEMPLATE_ID = process.env.EMAILJS_TEMPLATE_ID || 'template_x7tbqfs';
+                const EMAILJS_PUBLIC_KEY = process.env.EMAILJS_PUBLIC_KEY || 'VrD4W6V_afAXyBvag';
+
+                const templateParams = {
+                    to_email: email,
+                    user_name: userName || 'User',
+                    task_title: taskTitle || title,
+                    minutes_left: minutesLeft?.toString() || '',
+                    due_time: dueTime || '',
+                    subject: languageCode === 'vi'
+                        ? `⏰ Nhắc nhở Deadline - ${taskTitle || title}`
+                        : `⏰ Task Deadline Reminder - ${taskTitle || title}`,
+                };
+
+                const response = await fetch('https://api.emailjs.com/api/v1.0/email/send', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        service_id: EMAILJS_SERVICE_ID,
+                        template_id: EMAILJS_TEMPLATE_ID,
+                        user_id: EMAILJS_PUBLIC_KEY,
+                        template_params: templateParams,
+                    }),
+                });
+
+                if (response.ok) {
                     results.email = 'success';
+                } else {
+                    const errorText = await response.text();
+                    results.email = `failed: ${response.status} - ${errorText}`;
                 }
             } catch (e: any) {
-                console.error('Email Error:', e);
+                console.error('EmailJS Error:', e);
                 results.email = `failed: ${e.message}`;
             }
         }
 
         return NextResponse.json({ success: true, results });
     } catch (error: any) {
-        console.error('General Error:', error);
-        return NextResponse.json(
-            { error: 'Failed to process request', details: error.message },
-            { status: 500 }
-        );
+        return NextResponse.json({ error: 'Failed to process request', details: error.message }, { status: 500 });
     }
 }

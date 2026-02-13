@@ -24,11 +24,9 @@ The backend has been moved to a separate directory: `d:\My Source Code\cute_todo
 1. Import `cute-todo-backend` project in Vercel.
 2. **Environment Variables** (Settings > Environment Variables):
    - `FIREBASE_SERVICE_ACCOUNT_KEY`: (Your JSON service account)
-   - `SMTP_HOST`: `smtp.gmail.com` (or your provider)
-   - `SMTP_PORT`: `587`
-   - `SMTP_USER`: `your-email@gmail.com`
-   - `SMTP_PASS`: `your-app-password` (Generate an App Password if using Gmail)
-   - `SMTP_FROM`: `"Cute Todo" <your-email@gmail.com>`
+   - `EMAILJS_SERVICE_ID`: `service_lx2vsyo`
+   - `EMAILJS_TEMPLATE_ID`: `template_x7tbqfs`
+   - `EMAILJS_PUBLIC_KEY`: `VrD4W6V_afAXyBvag`
 
 ## Flutter Integration
 1. Open `lib/services/backend_service.dart`.
