@@ -61,6 +61,7 @@ export async function GET(request: Request) {
             const userName = userData.displayName || 'User';
 
             const sentMethods = [];
+            const errors = [];
 
             // Send FCM
             if (fcmToken) {
@@ -76,8 +77,12 @@ export async function GET(request: Request) {
                     });
                     sentMethods.push('FCM');
                 } catch (e: any) {
-                    console.error(`FCM failed for todo ${todoId}:`, e.message);
+                    const msg = `FCM failed: ${e.message}`;
+                    console.error(msg);
+                    errors.push(msg);
                 }
+            } else {
+                errors.push('No FCM Token found for user');
             }
 
             // Send Email via EmailJS
@@ -111,10 +116,14 @@ export async function GET(request: Request) {
                     } else {
                         const err = await emailResponse.text();
                         console.error(`EmailJS failed: ${err}`);
+                        errors.push(`EmailJS Error: ${err}`);
                     }
                 } catch (e: any) {
                     console.error(`Email attempt failed for todo ${todoId}:`, e.message);
+                    errors.push(`Email Exception: ${e.message}`);
                 }
+            } else {
+                errors.push('No Email found for user');
             }
 
             // Mark as sent
@@ -123,7 +132,8 @@ export async function GET(request: Request) {
                 todoId,
                 title: todo.title,
                 sentTo: email,
-                methods: sentMethods
+                methods: sentMethods,
+                errors: errors // Return errors to client
             });
         }
 
