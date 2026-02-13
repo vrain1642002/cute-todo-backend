@@ -3,29 +3,26 @@ import { getMessaging, getFirestore } from '@/lib/firebase-admin';
 
 export const dynamic = 'force-dynamic';
 
-// Endpoint to be called by a cron job (e.g., cron-job.org)
 export async function GET(request: Request) {
+    console.log('Cron Job Started: Checking deadlines');
     try {
         const db = getFirestore();
         const messaging = getMessaging();
         const now = new Date();
         const tenMinutesFromNow = new Date(now.getTime() + 10 * 60 * 1000);
 
-        console.log(`Checking deadlines between ${now.toISOString()} and ${tenMinutesFromNow.toISOString()}`);
-
-        // Query for tasks that:
-        // 1. Are in 'todo' status
-        // 2. Have a dueDate within the next 10 minutes
-        // 3. Haven't had a notification sent yet
+        // Simplify query to avoid complex index requirements which often cause 500 errors
+        // We'll filter 'notificationSent' in memory if needed, or keep it simple
         const todosSnapshot = await db.collection('todos')
             .where('status', '==', 'todo')
             .where('dueDate', '>=', now)
             .where('dueDate', '<=', tenMinutesFromNow)
-            .where('notificationSent', '!=', true)
             .get();
 
+        console.log(`Query returned ${todosSnapshot.size} potential todos`);
+
         if (todosSnapshot.empty) {
-            return NextResponse.json({ message: 'No upcoming deadlines found.' });
+            return NextResponse.json({ success: true, message: 'No upcoming deadlines found.' });
         }
 
         const results = [];
@@ -33,13 +30,20 @@ export async function GET(request: Request) {
         for (const doc of todosSnapshot.docs) {
             const todo = doc.data();
             const todoId = doc.id;
-            const userId = todo.userId;
 
-            // Get user's email and FCM token from 'users' collection
+            // Filter notificationSent in-memory to avoid needing a complex Firestore Index
+            if (todo.notificationSent === true) continue;
+
+            const userId = todo.userId;
+            console.log(`Processing todo: ${todo.title} for user: ${userId}`);
+
             const userDoc = await db.collection('users').doc(userId).get();
             const userData = userDoc.exists ? userDoc.data() : null;
 
-            if (!userData) continue;
+            if (!userData) {
+                console.warn(`User document not found for ID: ${userId}`);
+                continue;
+            }
 
             const fcmToken = userData.fcmToken;
             const email = userData.email;
@@ -51,14 +55,15 @@ export async function GET(request: Request) {
                     await messaging.send({
                         token: fcmToken,
                         notification: {
-                            title: '⏰ Deadline approaching!',
-                            body: `Task "${todo.title}" is due soon.`,
+                            title: '⏰ Deadline sắp đến!',
+                            body: `Công việc "${todo.title}" sắp đến hạn chót.`,
                         },
                         android: { priority: 'high' },
                         apns: { payload: { aps: { contentAvailable: true } } },
                     });
-                } catch (e) {
-                    console.error(`FCM failed for todo ${todoId}:`, e);
+                    console.log(`FCM sent successfully to user ${userId}`);
+                } catch (e: any) {
+                    console.error(`FCM failed for todo ${todoId}:`, e.message);
                 }
             }
 
@@ -69,9 +74,11 @@ export async function GET(request: Request) {
                     const EMAILJS_TEMPLATE_ID = process.env.EMAILJS_TEMPLATE_ID || 'template_x7tbqfs';
                     const EMAILJS_PUBLIC_KEY = process.env.EMAILJS_PUBLIC_KEY || 'VrD4W6V_afAXyBvag';
 
-                    const dueTime = todo.dueDate.toDate().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+                    // Formatting date for email
+                    const dateObj = todo.dueDate.toDate ? todo.dueDate.toDate() : new Date(todo.dueDate);
+                    const dueTime = dateObj.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
 
-                    await fetch('https://api.emailjs.com/api/v1.0/email/send', {
+                    const emailResponse = await fetch('https://api.emailjs.com/api/v1.0/email/send', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
@@ -87,19 +94,34 @@ export async function GET(request: Request) {
                             },
                         }),
                     });
-                } catch (e) {
-                    console.error(`Email failed for todo ${todoId}:`, e);
+
+                    if (emailResponse.ok) {
+                        console.log(`Email sent successfully via EmailJS to ${email}`);
+                    } else {
+                        const err = await emailResponse.text();
+                        console.error(`EmailJS failed: ${emailResponse.status} - ${err}`);
+                    }
+                } catch (e: any) {
+                    console.error(`Email attempt failed for todo ${todoId}:`, e.message);
                 }
             }
 
             // Mark as sent
             await doc.ref.update({ notificationSent: true });
-            results.push({ todoId, title: todo.title, status: 'notified' });
+            results.push({ todoId, title: todo.title });
         }
 
-        return NextResponse.json({ success: true, processed: results.length, results });
+        return NextResponse.json({
+            success: true,
+            processed: results.length,
+            results
+        });
     } catch (error: any) {
-        console.error('Cron Error:', error);
-        return NextResponse.json({ error: 'Failed to check deadlines', details: error.message }, { status: 500 });
+        console.error('CRITICAL CRON ERROR:', error);
+        return NextResponse.json({
+            error: 'Internal Server Error',
+            message: error.message,
+            stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+        }, { status: 500 });
     }
 }
