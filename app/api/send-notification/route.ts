@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
-import { messaging } from '@/lib/firebase-admin';
+import { getMessaging } from '@/lib/firebase-admin';
+
+export const dynamic = 'force-dynamic';
 
 export async function POST(request: Request) {
     try {
@@ -24,6 +26,7 @@ export async function POST(request: Request) {
         // 1. Send FCM Push Notification
         if (token) {
             try {
+                const messaging = getMessaging(); // Initialize on demand
                 const message = {
                     token,
                     notification: {
@@ -84,6 +87,7 @@ export async function POST(request: Request) {
 
         return NextResponse.json({ success: true, results });
     } catch (error: any) {
+        console.error('General Error:', error);
         return NextResponse.json({ error: 'Failed to process request', details: error.message }, { status: 500 });
     }
 }
