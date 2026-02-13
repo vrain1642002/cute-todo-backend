@@ -91,24 +91,40 @@ export async function GET(request: Request) {
                     const EMAILJS_SERVICE_ID = process.env.EMAILJS_SERVICE_ID || 'service_lx2vsyo';
                     const EMAILJS_TEMPLATE_ID = process.env.EMAILJS_TEMPLATE_ID || 'template_x7tbqfs';
                     const EMAILJS_PUBLIC_KEY = process.env.EMAILJS_PUBLIC_KEY || 'VrD4W6V_afAXyBvag';
+                    const EMAILJS_PRIVATE_KEY = process.env.EMAILJS_PRIVATE_KEY; // NEW: Access Token
 
                     const dueTime = dueDate.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+
+                    interface EmailPayload {
+                        service_id: string;
+                        template_id: string;
+                        user_id: string;
+                        template_params: Record<string, string>;
+                        accessToken?: string;
+                    }
+
+                    const emailPayload: EmailPayload = {
+                        service_id: EMAILJS_SERVICE_ID,
+                        template_id: EMAILJS_TEMPLATE_ID,
+                        user_id: EMAILJS_PUBLIC_KEY,
+                        template_params: {
+                            to_email: email,
+                            user_name: userName,
+                            task_title: todo.title,
+                            due_time: dueTime,
+                            subject: `⏰ Nhắc nhở Deadline - ${todo.title}`,
+                        },
+                    };
+
+                    // Add Access Token if available (Required for Server-side/Strict Mode)
+                    if (EMAILJS_PRIVATE_KEY) {
+                        emailPayload.accessToken = EMAILJS_PRIVATE_KEY;
+                    }
 
                     const emailResponse = await fetch('https://api.emailjs.com/api/v1.0/email/send', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            service_id: EMAILJS_SERVICE_ID,
-                            template_id: EMAILJS_TEMPLATE_ID,
-                            user_id: EMAILJS_PUBLIC_KEY,
-                            template_params: {
-                                to_email: email,
-                                user_name: userName,
-                                task_title: todo.title,
-                                due_time: dueTime,
-                                subject: `⏰ Nhắc nhở Deadline - ${todo.title}`,
-                            },
-                        }),
+                        body: JSON.stringify(emailPayload),
                     });
 
                     if (emailResponse.ok) {
