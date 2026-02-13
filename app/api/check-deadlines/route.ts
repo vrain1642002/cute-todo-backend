@@ -11,18 +11,16 @@ export async function GET(request: Request) {
         const now = new Date();
         const tenMinutesFromNow = new Date(now.getTime() + 10 * 60 * 1000);
 
-        // Simplify query to avoid complex index requirements which often cause 500 errors
-        // We'll filter 'notificationSent' in memory if needed, or keep it simple
+        // 🚀 ULTRA-SAFE QUERY: Only query by status to avoid ANY composite index requirements.
+        // We will perform all time-based filtering in memory.
         const todosSnapshot = await db.collection('todos')
             .where('status', '==', 'todo')
-            .where('dueDate', '>=', now)
-            .where('dueDate', '<=', tenMinutesFromNow)
             .get();
 
-        console.log(`Query returned ${todosSnapshot.size} potential todos`);
+        console.log(`Status filter returned ${todosSnapshot.size} potential todos. Filtering by time in-memory...`);
 
         if (todosSnapshot.empty) {
-            return NextResponse.json({ success: true, message: 'No upcoming deadlines found.' });
+            return NextResponse.json({ success: true, message: 'No tasks with status "todo" found.' });
         }
 
         const results = [];
@@ -31,11 +29,24 @@ export async function GET(request: Request) {
             const todo = doc.data();
             const todoId = doc.id;
 
-            // Filter notificationSent in-memory to avoid needing a complex Firestore Index
+            // 1. Skip if already notified
             if (todo.notificationSent === true) continue;
 
+            // 2. Process deadline dates (handle various Firestore date formats safely)
+            const rawDueDate = todo.dueDate;
+            if (!rawDueDate) continue;
+
+            const dueDate = (rawDueDate.toDate && typeof rawDueDate.toDate === 'function')
+                ? rawDueDate.toDate()
+                : new Date(rawDueDate);
+
+            // 3. In-memory check: Is it due between NOW and 10 minutes from now?
+            const isDueSoon = dueDate >= now && dueDate <= tenMinutesFromNow;
+
+            if (!isDueSoon) continue;
+
             const userId = todo.userId;
-            console.log(`Processing todo: ${todo.title} for user: ${userId}`);
+            console.log(`Processing soon-to-be-due todo: "${todo.title}" for user: ${userId}`);
 
             const userDoc = await db.collection('users').doc(userId).get();
             const userData = userDoc.exists ? userDoc.data() : null;
@@ -56,12 +67,11 @@ export async function GET(request: Request) {
                         token: fcmToken,
                         notification: {
                             title: '⏰ Deadline sắp đến!',
-                            body: `Công việc "${todo.title}" sắp đến hạn chót.`,
+                            body: `Công việc "${todo.title}" sắp đến hạn chót!`,
                         },
                         android: { priority: 'high' },
                         apns: { payload: { aps: { contentAvailable: true } } },
                     });
-                    console.log(`FCM sent successfully to user ${userId}`);
                 } catch (e: any) {
                     console.error(`FCM failed for todo ${todoId}:`, e.message);
                 }
@@ -74,9 +84,7 @@ export async function GET(request: Request) {
                     const EMAILJS_TEMPLATE_ID = process.env.EMAILJS_TEMPLATE_ID || 'template_x7tbqfs';
                     const EMAILJS_PUBLIC_KEY = process.env.EMAILJS_PUBLIC_KEY || 'VrD4W6V_afAXyBvag';
 
-                    // Formatting date for email
-                    const dateObj = todo.dueDate.toDate ? todo.dueDate.toDate() : new Date(todo.dueDate);
-                    const dueTime = dateObj.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+                    const dueTime = dueDate.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
 
                     const emailResponse = await fetch('https://api.emailjs.com/api/v1.0/email/send', {
                         method: 'POST',
@@ -95,11 +103,9 @@ export async function GET(request: Request) {
                         }),
                     });
 
-                    if (emailResponse.ok) {
-                        console.log(`Email sent successfully via EmailJS to ${email}`);
-                    } else {
+                    if (!emailResponse.ok) {
                         const err = await emailResponse.text();
-                        console.error(`EmailJS failed: ${emailResponse.status} - ${err}`);
+                        console.error(`EmailJS failed: ${err}`);
                     }
                 } catch (e: any) {
                     console.error(`Email attempt failed for todo ${todoId}:`, e.message);
@@ -120,8 +126,7 @@ export async function GET(request: Request) {
         console.error('CRITICAL CRON ERROR:', error);
         return NextResponse.json({
             error: 'Internal Server Error',
-            message: error.message,
-            stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+            message: error.message
         }, { status: 500 });
     }
 }
