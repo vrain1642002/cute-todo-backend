@@ -60,6 +60,8 @@ export async function GET(request: Request) {
             const email = userData.email;
             const userName = userData.displayName || 'User';
 
+            const sentMethods = [];
+
             // Send FCM
             if (fcmToken) {
                 try {
@@ -72,6 +74,7 @@ export async function GET(request: Request) {
                         android: { priority: 'high' },
                         apns: { payload: { aps: { contentAvailable: true } } },
                     });
+                    sentMethods.push('FCM');
                 } catch (e: any) {
                     console.error(`FCM failed for todo ${todoId}:`, e.message);
                 }
@@ -103,7 +106,9 @@ export async function GET(request: Request) {
                         }),
                     });
 
-                    if (!emailResponse.ok) {
+                    if (emailResponse.ok) {
+                        sentMethods.push('Email');
+                    } else {
                         const err = await emailResponse.text();
                         console.error(`EmailJS failed: ${err}`);
                     }
@@ -114,7 +119,12 @@ export async function GET(request: Request) {
 
             // Mark as sent
             await doc.ref.update({ notificationSent: true });
-            results.push({ todoId, title: todo.title });
+            results.push({
+                todoId,
+                title: todo.title,
+                sentTo: email,
+                methods: sentMethods
+            });
         }
 
         return NextResponse.json({
